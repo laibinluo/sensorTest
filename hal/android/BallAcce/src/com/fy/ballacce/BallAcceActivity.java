@@ -2,8 +2,16 @@ package com.fy.ballacce;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Vector;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import android.app.Activity;
 import android.content.Context;
@@ -17,6 +25,8 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
@@ -28,10 +38,20 @@ public class BallAcceActivity extends Activity {
 
 	MyView mAnimView = null;
 	private Socket socket = null;
-	private static final String IP = "192.168.52.205";
-	private static final int port = 6666;
-	private static byte[] bBuffer = new byte[20];
-	private InetSocketAddress addr = new InetSocketAddress(IP, port); //创建socket
+	private DataOutputStream dos = null;
+	private static final String IP = "192.168.52.237";
+	private static final int port = 5885;
+	private InetSocketAddress addr; //创建socket
+	//private SensorsData mData;
+	private List<SensorsData> list = new ArrayList<SensorsData>();
+	private final int LIST_LENGTH = 16;
+	private SendData mThread = null;
+	
+	private static HandlerThread sWorkThread = new HandlerThread("worker");
+	static {
+		sWorkThread.start();
+	}
+	private static Handler sWorker = new Handler(sWorkThread.getLooper());
     
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
@@ -43,10 +63,233 @@ public class BallAcceActivity extends Activity {
 
 		// 强制横屏
 //		setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-
+		addr = new InetSocketAddress(IP, port);
+//		mThread = new SendData(addr);
+//		mThread.start();
 		// 显示自定义的View
 		mAnimView = new MyView(this);
+		//mData = new SensorsData();
+	
 		setContentView(mAnimView);
+	}
+	
+	class MyRunnable implements Runnable {
+		
+		private SensorsData mData;
+		private Socket mSoc = null;
+		
+		public MyRunnable(Socket soc, SensorsData data) {
+			mSoc = soc;
+			mData = data;
+		}
+
+		@Override
+		public void run() {
+			//put data
+			
+			//socket
+			Log.e("//////", "mData = " + mData.timestamp);
+			try {
+				if(mSoc == null){
+					Log.v("//////", "soc = null");
+					mSoc = new Socket();
+					//socket = new Socket(IP, port);
+					mSoc.connect(addr);
+					if(dos == null){
+						dos = new DataOutputStream(mSoc.getOutputStream());
+					}
+					
+				}
+				Log.v("//////", "dos.write data");
+				
+				dos.write(mData.byData);	
+				if(mSoc == null){
+					Log.v("SendData", "///soc is null");
+				}
+				//Send();
+				dos.close();
+				mSoc.close();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				Log.v("SendData", "soc isnot connect !!");
+				Log.v("BallAcce1", e.getMessage());
+				e.printStackTrace();
+			}
+			
+		}
+		
+	}
+	
+	class SensorsData {
+		public int version;
+		public int sensor;
+		public int type;
+		public int reserved0;
+		public long timestamp;
+		public float [] data;
+		public int [] reserved1;
+		
+		public final int DATA_LENGTH = 16;
+		public final int RESERVED1_LENGHT = 4;
+		
+		private int index;
+		public byte [] byData;
+		
+		SensorsData(){
+			data = new float[16];
+			reserved1 = new int[4];
+			sensor = 1;
+			type = 0;
+			reserved0 = 0;
+			timestamp = 0;
+			index = -1;
+			version = 4 * Integer.SIZE + Long.SIZE + 16 * Float.SIZE + 4 * Integer.SIZE;
+			version /= 8;
+			
+			byData = new byte[version];
+			//index = 0;
+		}
+		
+		public void genSendData() {
+			intToByte(version);
+			intToByte(sensor);
+			intToByte(type);
+			intToByte(reserved0);
+			
+			longToByte(timestamp);
+			
+			int i = 0;
+			for(i = 0; i < DATA_LENGTH; ++i){
+				floatToByte(data[i]);
+			}
+			
+			for(i = 0; i < RESERVED1_LENGHT; ++i){
+				intToByte(reserved1[i]);
+			}
+		}
+		
+		public void intToByte(int n){
+			int i = 0;
+			if(index >= version - 1){
+				//Log.v("test", "intToByte" + version + index);
+				return ;
+			}
+			for(; i < 4; i++){
+				byData[++index] = (byte)(n >> (i*8));
+			}
+		}
+		
+		public void floatToByte(float x){
+			int n = Float.floatToIntBits(x);
+			int i = 0;
+			if(index >= version - 1){
+				return ;
+			}
+			for(; i < 4; i++){
+				byData[++index] = (byte)(n >> (i*8));
+			}
+		}
+		
+		public void longToByte(long n){
+			int i = 0;
+			if(index >= version - 1){
+				return ;
+			}
+			for(; i < 8; i++){
+				byData[++index] = (byte)(n >> (i*8));
+			}
+		}
+		
+		public void setData(SensorEvent event){
+			version = event.sensor.getVersion();
+			type = event.sensor.getType();
+			timestamp = event.timestamp;
+			data[0] = event.values[0];
+			data[1] = event.values[1];
+			data[2] = event.values[2];
+			data[3] = Float.intBitsToFloat(event.accuracy);
+		}
+	}
+	
+	class SendData extends Thread {
+		
+		private Lock lock = new ReentrantLock();
+		private Condition cond = lock.newCondition();
+		private Vector<SensorsData> queue = new Vector<SensorsData>();
+		private InetSocketAddress addr;
+		private Socket sock;
+		private OutputStream stream;
+		
+		public SendData(InetSocketAddress addr)
+		{
+			this.addr = addr;
+		}
+		
+		public void post(SensorsData d)
+		{
+			lock.lock();
+			queue.add(d);
+			cond.signal();
+			lock.unlock();
+		}
+		
+		public void exit()
+		{
+			lock.lock();
+			this.interrupt();
+			cond.signal();
+			lock.unlock();
+			try {
+				this.join();
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		
+		public void run() {
+			
+			sock = new Socket();
+			try {
+				sock.connect(addr);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			try {
+				stream = sock.getOutputStream();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
+			lock.lock();
+			
+			while (!isInterrupted()) {
+				
+				if (queue.isEmpty()) {
+					try {
+						cond.await();
+					} catch (InterruptedException e1) {
+						// TODO Auto-generated catch block
+						e1.printStackTrace();
+					}
+					continue;
+				}
+					
+				SensorsData first = queue.firstElement();
+				queue.remove(0);
+				
+				try {
+					stream.write(first.byData);
+				} catch (IOException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+			}
+			
+			lock.unlock();
+		}
 	}
 
 	class MyView extends SurfaceView implements Callback, Runnable,
@@ -91,7 +334,7 @@ public class BallAcceActivity extends Activity {
 		private float mGX = 0;
 		private float mGY = 0;
 		private float mGZ = 0;
-
+		
 		public MyView(Context context) {
 			super(context);
 			// TODO Auto-generated constructor stub
@@ -121,25 +364,8 @@ public class BallAcceActivity extends Activity {
 			// SENSOR_DELAY_FASTEST 最灵敏 因为太快了没必要使用
 			// SENSOR_DELAY_GAME 游戏开发中使用
 			// SENSOR_DELAY_NORMAL 正常速度
-			// SENSOR_DELAY_UI 最慢的速度
+			// SENSOR_DELAY_UI 最慢的速度	
 			
-			
-			/*new Thread(new Runnable() {
-				@Override
-				public void run() {
-					try {
-				    	//socket = new Socket(IP, port);
-						socket.connect(addr, 5000);
-						
-					} catch (IOException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-						Log.v("BallAcce", e.getMessage());
-					} 
-					// TODO Auto-generated method stub
-					
-				}
-			}).start();*/
 			mSensorMgr.registerListener(this, mSensor,
 					SensorManager.SENSOR_DELAY_GAME);
 		}
@@ -158,43 +384,29 @@ public class BallAcceActivity extends Activity {
 		@Override
 		public void onAccuracyChanged(Sensor sensor, int accuracy) {
 			// TODO Auto-generated method stub
-
-		}
-
-		public byte[] floatToByte(float x, float y, float z){
-			byte [] b = new byte[20];
-			int n = Float.floatToIntBits(x);
-			int i = 0;
-			for(i = 0; i < 4; i++){
-				b[i] = (byte)(n >> (24 - i*8));
-			}
-			n = Float.floatToIntBits(y);
-			for( ; i < 8; i++){
-				b[i] = (byte)(n >> (24 - i*8));
-			}
-			n = Float.floatToIntBits(z);
-			for( ; i < 12; i++){
-				b[i] = (byte)(n >> (24 - i*8));
-			}
-			
-			return b;
 		}
 		@Override
 		public void onSensorChanged(SensorEvent event) {
+//			SensorsData data = new SensorsData();
+//			//data.version = event.sensor.getVersion();
+//			data.type = event.sensor.getType();
+//			data.timestamp = event.timestamp;
+//			data.data[0] = event.values[0];
+//			data.data[1] = event.values[1];
+//			data.data[2] = event.values[2];
+//			data.data[3] = Float.intBitsToFloat(event.accuracy);
+//			Log.v("/////", "onSensorChanged");
+//			data.genSendData();
+			//mThread.post(data);
+			//sWorker.post(new MyRunnable(data));
+			//mThread.new AddThread(data).start(); 
+////			if(socket == null){
+//				Log.v("SendData", "socket is null");
+//			}
 			// TODO Auto-generated method stub
 			mGX = event.values[0];
 			mGY = event.values[1];
 			mGZ = event.values[2];
-			
-			/*try {	
-				DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-				byte [] byData = floatToByte(mGX, mGY, mGZ);
-				dos.write(byData);
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-			*/
 			// 这里乘以2是为了让小球移动的更快
 			mPosX -= mGX * 2;
 			mPosY += mGY * 2;
@@ -242,7 +454,6 @@ public class BallAcceActivity extends Activity {
 		public void surfaceChanged(SurfaceHolder holder, int format, int width,
 				int height) {
 			// TODO Auto-generated method stub
-
 		}
 
 		@Override
