@@ -39,33 +39,42 @@ public class BallAcceActivity extends Activity {
 	MyView mAnimView = null;
 	private Socket socket = null;
 	private DataOutputStream dos = null;
-	private static final String IP = "192.168.52.237";
-	private static final int port = 5885;
+	private String mIP;// = "192.168.52.54";
+	private int mPort; //= 5885;
 	private InetSocketAddress addr; //创建socket
 	//private SensorsData mData;
 	private List<SensorsData> list = new ArrayList<SensorsData>();
 	private final int LIST_LENGTH = 16;
 	private SendData mThread = null;
+	private final String KEY_IP = "IP";
+	private final String KEY_PORT = "PORT";
+	private final String TAG = "DiscoveryActivity";
 	
-	private static HandlerThread sWorkThread = new HandlerThread("worker");
-	static {
-		sWorkThread.start();
-	}
-	private static Handler sWorker = new Handler(sWorkThread.getLooper());
+//	private static HandlerThread sWorkThread = new HandlerThread("worker");
+//	static {
+//		sWorkThread.start();
+//	}
+//	private static Handler sWorker = new Handler(sWorkThread.getLooper());
     
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-
+		
+		Bundle bundle = this.getIntent().getExtras();
+		mIP = bundle.getString(KEY_IP);
+		mPort = bundle.getInt(KEY_PORT);
+		
+		Log.v(TAG, "rec ip : " + mIP);
+		Log.v(TAG, "rec port : " + mPort);
 		// 全屏显示窗口,这些参数必须在setContentView()之前显示
 		requestWindowFeature(Window.FEATURE_NO_TITLE);
 //		requestWindowFeature(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-
+      
 		// 强制横屏
 //		setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-		addr = new InetSocketAddress(IP, port);
-//		mThread = new SendData(addr);
-//		mThread.start();
+		addr = new InetSocketAddress(mIP, mPort);
+		mThread = new SendData(addr);
+		mThread.start();
 		// 显示自定义的View
 		mAnimView = new MyView(this);
 		//mData = new SensorsData();
@@ -117,7 +126,6 @@ public class BallAcceActivity extends Activity {
 			}
 			
 		}
-		
 	}
 	
 	class SensorsData {
@@ -216,9 +224,9 @@ public class BallAcceActivity extends Activity {
 		private Lock lock = new ReentrantLock();
 		private Condition cond = lock.newCondition();
 		private Vector<SensorsData> queue = new Vector<SensorsData>();
-		private InetSocketAddress addr;
-		private Socket sock;
-		private OutputStream stream;
+		private InetSocketAddress addr = null;
+		private Socket sock = null;
+		private OutputStream stream = null;
 		
 		public SendData(InetSocketAddress addr)
 		{
@@ -248,11 +256,13 @@ public class BallAcceActivity extends Activity {
 		}
 		
 		public void run() {
-			
+			Log.v(TAG, "RUNNING");
 			sock = new Socket();
 			try {
 				sock.connect(addr);
+				Log.v(TAG, "RUNNING SOCKET");
 			} catch (IOException e) {
+				Log.v(TAG, "connect fail : " + e.getMessage());
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
@@ -261,6 +271,11 @@ public class BallAcceActivity extends Activity {
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
+				Log.v(TAG, "connect fail : " + e.getMessage());
+			}
+			
+			if((null == sock) || (stream == null)){
+				Log.v(TAG, "mdns connect failed!");
 			}
 			
 			lock.lock();
@@ -277,6 +292,7 @@ public class BallAcceActivity extends Activity {
 					continue;
 				}
 					
+				Log.v(TAG, "list size : " + queue.size());
 				SensorsData first = queue.firstElement();
 				queue.remove(0);
 				
@@ -284,10 +300,11 @@ public class BallAcceActivity extends Activity {
 					stream.write(first.byData);
 				} catch (IOException e1) {
 					// TODO Auto-generated catch block
+					Log.v(TAG, "mdns connect success!");
 					e1.printStackTrace();
 				}
 			}
-			
+			Log.v(TAG, "mdns connect success++++!");
 			lock.unlock();
 		}
 	}
@@ -359,7 +376,7 @@ public class BallAcceActivity extends Activity {
 					R.drawable.bg);
 			/** 得到SensorManager对象 **/
 			mSensorMgr = (SensorManager) getSystemService(SENSOR_SERVICE);
-			mSensor = mSensorMgr.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+			mSensor = mSensorMgr.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
 			// 注册listener，第三个参数是检测的精确度
 			// SENSOR_DELAY_FASTEST 最灵敏 因为太快了没必要使用
 			// SENSOR_DELAY_GAME 游戏开发中使用
@@ -387,17 +404,17 @@ public class BallAcceActivity extends Activity {
 		}
 		@Override
 		public void onSensorChanged(SensorEvent event) {
-//			SensorsData data = new SensorsData();
-//			//data.version = event.sensor.getVersion();
-//			data.type = event.sensor.getType();
-//			data.timestamp = event.timestamp;
-//			data.data[0] = event.values[0];
-//			data.data[1] = event.values[1];
-//			data.data[2] = event.values[2];
-//			data.data[3] = Float.intBitsToFloat(event.accuracy);
-//			Log.v("/////", "onSensorChanged");
-//			data.genSendData();
-			//mThread.post(data);
+			SensorsData data = new SensorsData();
+			//data.version = event.sensor.getVersion();
+			data.type = event.sensor.getType();
+			data.timestamp = event.timestamp;
+			data.data[0] = event.values[0];
+			data.data[1] = event.values[1];
+			data.data[2] = event.values[2];
+			data.data[3] = Float.intBitsToFloat(event.accuracy);
+			//Log.v("/////", "onSensorChanged");
+			data.genSendData();
+			mThread.post(data);
 			//sWorker.post(new MyRunnable(data));
 			//mThread.new AddThread(data).start(); 
 ////			if(socket == null){

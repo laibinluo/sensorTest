@@ -26,22 +26,18 @@
 #include <stdio.h>        // for printf
 #include <stdlib.h>        // for exit
 #include <string.h>        // for bzero
-#include <sys/un.h>
 
 //#define SENSORS_GYROSCOPE_HANDLE        (ID_GY)
-#define NET_PORT 48371
+#define NET_PORT 5885
 #define LENGTH_OF_LISTEN_QUEUE 20
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 1024
 #define FILE_NAME_MAX_SIZE 512
-#define MDNS_SOCKET "/dev/socket/mdns"
-//#define MDNSSENSOR "MdnsSensor"
-
 int server_socket;
 int new_server_socket;
 struct sockaddr_in client_addr;
  socklen_t length ;
-typedef unsigned char Byte;
-Byte byBuffer[BUFFER_SIZE];
+
+
 
 void open_socket( void)
 {
@@ -81,7 +77,6 @@ static char tbuffer[sizeof(sensors_event_t)];
 
 int recv_tcp_to_sensors( sensors_event_t* data, int count)
 {
-
 /*
 	InCom_num = Num - Com_Length_buffer 剩余不完整sensors_event_t数据长度
 	Com_buffer_Length_addr = buffer + Com_Length_buffer 剩余数据在内存中起始地址
@@ -140,7 +135,7 @@ static const struct sensor_t sSensorList[] = {
         {    "ST 3-axis Gyroscope sensor",       
              "STMicroelectronics",  
               1, 1,  
-              SENSOR_TYPE_ACCELEROMETER, 4.0f*9.81f, 
+              SENSOR_TYPE_GYROSCOPE, 4.0f*9.81f, 
 		     (4.0f*9.81f)/256.0f, 0.2f, 0, { } },
 } ;
 
@@ -182,8 +177,15 @@ static int  poll_poll(struct sensors_poll_device_t *dev,
 			close(new_server_socket);
 			new_server_socket = -1;
 			continue;
-		}	
+		}
+			
+		
+		
+		
 	 }while(n <=0);
+		
+		
+    
 	return n;
 }    
 
@@ -208,80 +210,6 @@ static int poll_close(hw_device_t *dev) {
     return 0;
 }
 
-void registerMdns()
-{
-	int cfd;
-	struct sockaddr_un s_add;
-	cfd = socket(PF_UNIX, SOCK_STREAM, 0);
-	if(-1 == cfd)
-	{
-		printf("socket fail ! \r\n");
-		return -1;
-	}
-	printf("socket ok !\r\n");
-	bzero(&s_add,sizeof(s_add));
-	s_add.sun_family=AF_UNIX;
-	strcpy(s_add.sun_path, MDNS_SOCKET);
-
-	if(-1 == connect(cfd, (struct sockaddr *)(&s_add), sizeof(s_add)))
-	{
-		perror("connect fail !\r\n");
-		return -1;
-	}
-	printf("connect ok !\r\n");
-	
-	//start-service
-	memset(byBuffer, 0,BUFFER_SIZE);
-	snprintf(byBuffer, sizeof(byBuffer), "%s", "1 mdnssd start-service ");
-	printf("send data: %s\n", byBuffer);
-	int count = 0;
-	int length = strlen(byBuffer) + 1;
-	while(count < length)
-	{
-		int wlen = 0;
-		if(-1 == (wlen = send(cfd, byBuffer + count, length - count, 0)))
-		{
-			perror("send data error\n");
-			return ;
-		}
-		count += wlen;
-	}
-	memset(byBuffer, 0,BUFFER_SIZE);
-	if(-1 == recv(cfd, byBuffer, BUFFER_SIZE,0))
-	{
-		perror("recv data error\n");
-		return;
-	}
-	printf("start-service: %s\n", byBuffer);
-	
-	//snprintf(byBuffer, sizeof(byBuffer), "%s", "3 mdnssd register 1 MdnsSensor _http._tcp. 5885");
-	//register sensor service
-	memset(byBuffer, 0,BUFFER_SIZE);
-	snprintf(byBuffer, sizeof(byBuffer), "%s", "2 mdnssd register 1220 MdnsSensor _http._tcp. 48371");
-	printf("send data: %s\n", byBuffer);
-	count = 0;
-	length = strlen(byBuffer) + 1;
-	while(count < length)
-	{
-		int wlen = 0;
-		if(-1 == (wlen = send(cfd, byBuffer + count, length - count, 0)))
-		{
-			perror("send data error\n");
-			return ;
-		}
-		count += wlen;
-	}
-	printf("send success!\n");
-	memset(byBuffer, 0,BUFFER_SIZE);
-	if(-1 == recv(cfd, byBuffer, BUFFER_SIZE,0))
-	{
-		perror("recv data error\n");
-		return;
-	}
-	printf("read data: %s\n", byBuffer);
-	close(cfd);
-}
-
 static int open_sensors(const hw_module_t* module, const char* name,
         hw_device_t** device) {
     if (1) {
@@ -298,13 +226,13 @@ static int open_sensors(const hw_module_t* module, const char* name,
 
         *device = (hw_device_t*) dev;
 		open_socket( );
-		registerMdns();
-		
+
         return 0;
     } else {
         return -EINVAL;
     }
 }
+
 
 static struct hw_module_methods_t sensors_module_methods = {
     .open = open_sensors,
