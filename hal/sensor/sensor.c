@@ -29,7 +29,7 @@
 #include <sys/un.h>
 
 //#define SENSORS_GYROSCOPE_HANDLE        (ID_GY)
-#define NET_PORT 48371
+#define NET_PORT 48332
 #define LENGTH_OF_LISTEN_QUEUE 20
 #define BUFFER_SIZE 4096
 #define FILE_NAME_MAX_SIZE 512
@@ -257,7 +257,7 @@ void registerMdns()
 	//snprintf(byBuffer, sizeof(byBuffer), "%s", "3 mdnssd register 1 MdnsSensor _http._tcp. 5885");
 	//register sensor service
 	memset(byBuffer, 0,BUFFER_SIZE);
-	snprintf(byBuffer, sizeof(byBuffer), "%s", "2 mdnssd register 1220 MdnsSensor _http._tcp. 48371");
+	snprintf(byBuffer, sizeof(byBuffer), "%s", "2 mdnssd register 1209 MdnsSensor _http._tcp. 48332");
 	printf("send data: %s\n", byBuffer);
 	count = 0;
 	length = strlen(byBuffer) + 1;
